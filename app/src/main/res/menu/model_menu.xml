@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/model_menu_title"
+        android:title="@string/select_a_model" android:enabled="false" />
+    <item android:id="@+id/eye_eyebrows"
+        android:title="@string/eye_eyebrows" />
+    <item android:id="@+id/face_contour"
+        android:title="@string/face_contour" />
+    <item android:id="@+id/nose_mouth"
+        android:title="@string/nose_mouth" />
+    <item android:id="@+id/fast_68_land"
+        android:title="@string/fast_68_landmarks" />
+    <item android:id="@+id/dlib_68_land"
+        android:title="@string/dlib_68_landmarks" />
+</menu>
