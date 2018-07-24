@@ -1,6 +1,7 @@
 /*
  * Luca Anzalone
  */
+
 #include <jni.h>
 
 #include <string>
@@ -26,6 +27,8 @@
 #define JNI_METHOD(NAME) \
     Java_com_dev_anzalone_luca_tirocinio_Native_##NAME
 
+#define KERNEL_SIZE 15
+
 #define NV21 17
 #define YV12 842094169
 #define YUV_420_888 35
@@ -34,10 +37,9 @@ using namespace std;
 //--------------------------------------------------------------------------------------------------
 //-- LANDMARK DETECTION
 //--------------------------------------------------------------------------------------------------
-//TODO: catch signals
 dlib::shape_predictor shape_predictor;
 std::mutex _mutex;
-int imageFormat = 17; //NV21
+int imageFormat = NV21;
 
 extern "C"
 JNIEXPORT void JNICALL
@@ -73,8 +75,6 @@ void rotateMat(cv::Mat &mat, int rotation) {
     }
 }
 
-//int _count = 0;
-
 extern "C"
 JNIEXPORT void JNICALL
 JNI_METHOD(setImageFormat)(JNIEnv* env, jclass, jint format) {
@@ -94,13 +94,18 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
     cv::Mat grayMat(height, width, CV_8UC1);
 
     // to grayscale
-//    cv::cvtColor(yuvMat, grayMat, CV_YUV2GRAY_NV21); // CV_YUV420sp2GRAY, CV_YUV2GRAY_YV12
     if (imageFormat == NV21)
         cv::cvtColor(yuvMat, grayMat, CV_YUV2GRAY_NV21);
     else if (imageFormat == YV12)
         cv::cvtColor(yuvMat, grayMat, CV_YUV2GRAY_YV12);
 
     rotateMat(grayMat, rotation);
+
+    // histogram equalization (to improve contrast)
+    cv::equalizeHist(grayMat, grayMat);
+
+    // remove noise (median blur filter)
+//    cv::medianBlur(grayMat, grayMat, 7);
 
     // cv::mat to dlib::image
     dlib::cv_image<unsigned char> image = dlib::cv_image<unsigned char>(grayMat);
