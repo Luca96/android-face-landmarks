@@ -27,7 +27,7 @@
 #define JNI_METHOD(NAME) \
     Java_com_dev_anzalone_luca_tirocinio_Native_##NAME
 
-#define KERNEL_SIZE 15
+#define KERNEL_SIZE 9
 
 #define NV21 17
 #define YV12 842094169
@@ -99,16 +99,19 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
     else if (imageFormat == YV12)
         cv::cvtColor(yuvMat, grayMat, CV_YUV2GRAY_YV12);
 
+    // adgiust rotation according to phone orientation
     rotateMat(grayMat, rotation);
 
-    // histogram equalization (to improve contrast)
-    cv::equalizeHist(grayMat, grayMat);
+    // crop face for enhancements
+    cv::Rect faceROI(left, top, right - left, bottom - top);
+    cv::Mat face = grayMat(faceROI);
 
-    // remove noise (median blur filter)
-//    cv::medianBlur(grayMat, grayMat, 7);
+    // apply filter
+    cv::medianBlur(face, face, KERNEL_SIZE);  //remove noise
+    cv::equalizeHist(face, face);  // improve contrast
 
     // cv::mat to dlib::image
-    dlib::cv_image<unsigned char> image = dlib::cv_image<unsigned char>(grayMat);
+    dlib::cv_image<unsigned char> image(grayMat);
 
     // detect landmark points
     _mutex.lock();
