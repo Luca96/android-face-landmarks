@@ -9,7 +9,8 @@ import android.view.View
 import com.dev.anzalone.luca.tirocinio.utils.mapTo
 
 /**
- *
+ * The CameraOverlay class is placed on-top of the CameraPreview,
+ * in order to draw the face region and landmarks easily.
  * Created by Luca on 10/04/2018.
  */
 
@@ -42,6 +43,7 @@ class CameraOverlay(context: Context, attrs: AttributeSet) : View(context, attrs
         return Pair(x, y)
     }
 
+    /** All the drawings occur here. onDraw is triggered when invalidate() is called */
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -53,10 +55,14 @@ class CameraOverlay(context: Context, attrs: AttributeSet) : View(context, attrs
             canvas.drawRect(rect, rPaint)
 
             landmarks?.let {
+//                var count = 0
                 for (i in it.indices step 2) {
                     val (x, y) = adjustPoint(it[i], it[i + 1])
 
                     canvas.drawCircle(x, y, 8f, pPaint)
+
+//                    canvas.drawText(count.toString(), x, y, white)
+//                    count++
                 }
             }
         }
@@ -67,6 +73,7 @@ class CameraOverlay(context: Context, attrs: AttributeSet) : View(context, attrs
     companion object {
         private val rPaint = Paint()
         private val pPaint = Paint()
+        private val white = Paint()
 
         init {
             rPaint.color = Color.rgb(255, 160, 0)
@@ -75,6 +82,10 @@ class CameraOverlay(context: Context, attrs: AttributeSet) : View(context, attrs
 
             pPaint.color = Color.YELLOW
             pPaint.style = Paint.Style.FILL
+
+            white.color = Color.WHITE
+            white.style = Paint.Style.STROKE
+            white.textSize = 30f
         }
     }
 }

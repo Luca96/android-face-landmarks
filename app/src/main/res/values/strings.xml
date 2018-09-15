@@ -5,6 +5,6 @@
     <string name="eye_eyebrows">Eye eyebrows</string>
     <string name="face_contour">Face contour</string>
     <string name="nose_mouth">Nose mouth</string>
-    <string name="fast_68_landmarks">68 Landmarks</string>
+    <string name="fast_68_landmarks">Fast 68 Landmarks</string>
     <string name="dlib_68_landmarks">Dlib 68 Landmarks</string>
 </resources>

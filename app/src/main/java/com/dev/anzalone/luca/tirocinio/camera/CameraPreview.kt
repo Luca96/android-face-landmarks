@@ -30,7 +30,7 @@ import kotlin.math.absoluteValue
  */
 
 class CameraPreview(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), SurfaceHolder.Callback {
-    private var camera: Camera? = null //toDO: ADD PRIVATE
+    private var camera: Camera? = null //TODO: ADD PRIVATE
     private var running = false
     private var facing  = CameraUtils.front
 
@@ -43,7 +43,7 @@ class CameraPreview(context: Context, attrs: AttributeSet) : SurfaceView(context
 
     init {
         holder.addCallback(this)
-        //holder.setFormat(ImageFormat.NV21)
+//        holder.setFormat(ImageFormat.NV21)
         holder.setFormat(ImageFormat.JPEG)
 //        holder.setType(SurfaceHolder.SURFACE_TYPE_HARDWARE) // deprecated, thus ignored
     }

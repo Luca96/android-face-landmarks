@@ -11,6 +11,7 @@
 #include <android/log.h>
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/features2d.hpp>  // FAST
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
@@ -28,35 +29,87 @@
 #define JNI_METHOD(NAME) \
     Java_com_dev_anzalone_luca_tirocinio_Native_##NAME
 
-#define KERNEL_SIZE 9
+#define KERNEL_SIZE 5 // 3, 5, 7, 9
 
 #define NV21 17
 #define YV12 842094169
 #define YUV_420_888 35
-#define PYRAMIDS 5 - 1
-#define MAX_FRAME_COUNT 2
+#define PYRAMIDS 3
+#define MAX_FRAME_COUNT 5
 
 using namespace std;
-//--------------------------------------------------------------------------------------------------
-//-- LANDMARK DETECTION
-//--------------------------------------------------------------------------------------------------
+
+// global variables:
 dlib::shape_predictor shape_predictor;
 std::mutex _mutex;
 int imageFormat = NV21;
 
-// tracking variables
-int frameCount = 0;
-bool trackingActive = false;
-cv::Mat prevMat;
-vector<cv::Point2f> prevTrackPts;
-vector<cv::Point2f> nextTrackPts;
-cv::TermCriteria criteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
-//cv::Size trackingROI(31, 31);
-cv::Size trackingROI(9, 9);
+// -------------------------------------------------------------------------------------------------
+// -- Lucas-Kanade Optical Flow Tracker
+// -------------------------------------------------------------------------------------------------
+namespace LK {
+    // variables
+    int frameCount = 0;
+    bool isTracking = false;
+    cv::Mat prev_img;
+    vector<cv::Point2f> prev_pts;
+    vector<cv::Point2f> next_pts;
+    cv::TermCriteria criteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 25, 0.01);
+    cv::Size ROI(20, 20);
 
-inline void tracking() {
+    /** Initialize tracking with the current frame and detected landmarks */
+    void start(cv::Mat &mat, dlib::full_object_detection &pts) {
+        // release stuff..
+        prev_img.release();
+        prev_img = mat;
+        prev_pts.clear();
+        next_pts.clear();
 
+        // consider the new points
+        for (unsigned long i = 0; i < pts.num_parts(); i++) {
+            auto pt = pts.part(i);
+            prev_pts.push_back(cv::Point2f(pt.x(), pt.y()));
+        }
+
+        // reset count
+        frameCount = 0;
+        isTracking = true;
+    }
+
+    /** tracking points in the next captured frame */
+    vector<cv::Point2f> track(cv::Mat &frame) {
+        vector<uchar> status;
+        vector<float> err;
+        vector<cv::Point2f> tracked;
+
+        // get the new points from the old one
+        calcOpticalFlowPyrLK(prev_img, frame, prev_pts, next_pts, status, err,
+                             ROI, PYRAMIDS, criteria);
+
+        for (int i = 0; i < status.size(); ++i) {
+            if (status[i] == 0) {
+                // flow not found: take the old point
+                tracked.push_back(prev_pts[i]);
+            } else {
+                // flow found: take the new point
+                tracked.push_back(next_pts[i]);
+            }
+        }
+
+        // switch the previous points and image with the current
+        swap(prev_img, frame);
+        swap(prev_pts, tracked);
+        next_pts.clear();
+
+        // increase tracking frame count
+        if (frameCount++ > MAX_FRAME_COUNT) {
+            isTracking = false;
+        }
+
+        return prev_pts;
+    }
 }
+// -------------------------------------------------------------------------------------------------
 
 extern "C"
 JNIEXPORT void JNICALL
@@ -65,13 +118,8 @@ JNI_METHOD(loadModel)(JNIEnv* env, jclass, jstring detectorPath) {
         const char *path = env->GetStringUTFChars(detectorPath, JNI_FALSE);
 
         _mutex.lock();
-            // initialize variables for sudden tracking
-            frameCount = 0;
-            prevMat.release();
-            trackingActive = false;
-
-            prevTrackPts.clear();
-            nextTrackPts.clear();
+            // cause the later initialization of the tracking
+            LK::isTracking = false;
 
             // load the shape predictor
             dlib::deserialize(path) >> shape_predictor;
@@ -85,6 +133,7 @@ JNI_METHOD(loadModel)(JNIEnv* env, jclass, jstring detectorPath) {
     }
 }
 //--------------------------------------------------------------------------------------------------
+
 void rotateMat(cv::Mat &mat, int rotation) {
     if (rotation == 90) { // portrait
         LOGD("JNI: rotation 90");
@@ -105,6 +154,10 @@ JNI_METHOD(setImageFormat)(JNIEnv* env, jclass, jint format) {
     imageFormat = format;
 }
 
+
+//--------------------------------------------------------------------------------------------------
+//-- LANDMARK DETECTION
+//--------------------------------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jlongArray JNICALL
 JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotation, jint width, jint height, jint left, jint top, jint right, jint bottom) {
@@ -132,26 +185,18 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
 
     // apply filters
     cv::medianBlur(face, face, KERNEL_SIZE);  //remove noise
-//    cv::equalizeHist(face, face);  // improve contrast
+    cv::equalizeHist(face, face);  // improve contrast
 
-    if (!trackingActive) {
+    if (!LK::isTracking) {
         // -- DETECT LANDMARKS -- //
-
-        // crop face for enhancements
-//        cv::Rect faceROI(left, top, right - left, bottom - top);
-//        cv::Mat face = grayMat(faceROI);
-//
-//        // apply filters
-//        cv::medianBlur(face, face, KERNEL_SIZE);  //remove noise
-//        cv::equalizeHist(face, face);  // improve contrast
 
         // cv::mat to dlib::image
         dlib::cv_image<unsigned char> image(grayMat);
 
         // detect landmark points
         _mutex.lock();
-            dlib::rectangle region(left, top, right, bottom);
-            dlib::full_object_detection points = shape_predictor(image, region);
+        dlib::rectangle region(left, top, right, bottom);
+        dlib::full_object_detection points = shape_predictor(image, region);
         _mutex.unlock();
 
         // result
@@ -165,11 +210,8 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
         auto k = 0;
         for (unsigned long i = 0l; i < num_points; ++i) {
             dlib::point p = points.part(i);
-
             buffer[k++] = p.x();
             buffer[k++] = p.y();
-
-            prevTrackPts.push_back(cv::Point2f(p.x(), p.y()));
         }
 
         // set the content of buffer into result array
@@ -178,28 +220,17 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
         // free mem
         env->ReleaseByteArrayElements(yuvFrame, data, 0);
 
-        // enable tracking for the next frames and save current gray-mat
-        trackingActive = true;
-        prevMat = grayMat;
-
-        LOGD("JNI: Tracking TRUE");
+        // uncomment to enable tracking for the next frames
+//        LK::start(grayMat, points);
 
         return result;
 
     } else {
         // -- COMPUTE LK-OPTICAL FLOW --
-        vector<uchar> status;
-        vector<float> err;
-
-        LOGD("JNI: before LK");
-
-        calcOpticalFlowPyrLK(prevMat, grayMat, prevTrackPts, nextTrackPts, status, err,
-            cv::Size(11, 11), 2, criteria, 0, 0.001);
-
-        LOGD("JNI: after LK");
+        auto trackedPts = LK::track(grayMat);
 
         // result
-        auto num_points = nextTrackPts.size();
+        auto num_points = trackedPts.size();
         jsize len = (jsize) (num_points * sizeof(short)); // num_points * 2
 
         jlong buffer[len];
@@ -208,13 +239,10 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
         // copy tracked points in the buffer
         auto k = 0;
         for (unsigned long i = 0l; i < num_points; ++i) {
-            auto p = nextTrackPts[i];
+            auto p = trackedPts[i];
             buffer[k++] = static_cast<jlong>(p.x);
             buffer[k++] = static_cast<jlong>(p.y);
         }
-
-        swap(prevTrackPts, nextTrackPts);
-        swap(prevMat, grayMat);
 
         // set the content of buffer into result array
         env->SetLongArrayRegion(result, 0, len, buffer);
@@ -222,26 +250,15 @@ JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotat
         // free mem
         env->ReleaseByteArrayElements(yuvFrame, data, 0);
 
-        if (frameCount++ >= MAX_FRAME_COUNT) {
-            // re-initialize variables for the next tracking
-            frameCount = 0;
-            prevMat.release();
-            trackingActive = false;
-
-            prevTrackPts.clear();
-            nextTrackPts.clear();
-
-            LOGD("JNI: Tracking ENDED");
-        }
-
         return result;
     }
 }
 
+
 /*
 extern "C"
 JNIEXPORT jlongArray JNICALL
-JNI_METHOD(detectLandmarks_copy)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotation, jint width, jint height, jint left, jint top, jint right, jint bottom) {
+JNI_METHOD(detectLandmarks)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint rotation, jint width, jint height, jint left, jint top, jint right, jint bottom) {
     LOGD("JNI: detectLandmarks");
 
     // copy content of frame into image
@@ -273,8 +290,8 @@ JNI_METHOD(detectLandmarks_copy)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint 
 
     // detect landmark points
     _mutex.lock();
-    dlib::rectangle region(left, top, right, bottom);
-    dlib::full_object_detection points = shape_predictor(image, region);
+        dlib::rectangle region(left, top, right, bottom);
+        dlib::full_object_detection points = shape_predictor(image, region);
     _mutex.unlock();
 
 //    dlib::array2d<unsigned char> cropped;
@@ -313,5 +330,5 @@ JNI_METHOD(detectLandmarks_copy)(JNIEnv* env, jclass, jbyteArray yuvFrame, jint 
 
     return result;
 }
-*/
+ */
 //--------------------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import android.graphics.Rect;
 import android.util.Log;
 
 /**
- * Native
+ * Native:  act as an interface between Kotlin and C++
  * Created by Luca on 12/04/2018.
  */
 public final class Native {

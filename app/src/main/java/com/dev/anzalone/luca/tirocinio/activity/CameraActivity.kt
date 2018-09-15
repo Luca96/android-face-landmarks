@@ -20,19 +20,20 @@ import com.dev.anzalone.luca.tirocinio.camera.CameraUtils
 import com.dev.anzalone.luca.tirocinio.utils.Model
 import com.dev.anzalone.luca.tirocinio.utils.mapTo
 import kotlinx.android.synthetic.main.activity_camera.*
-import kotlinx.coroutines.experimental.Deferred
+import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.android.UI
-import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.channels.actor
-import kotlinx.coroutines.experimental.delay
-import kotlinx.coroutines.experimental.launch
+import org.json.JSONArray
+import java.io.BufferedInputStream
 import java.io.File
+import java.net.URL
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 
 /**
- * CameraActivity
+ * CameraActivity: puts all together by previewing the captured frames,
+ * running the android face detector, localizing the landmarks and building the user interface.
  * Created by Luca on 08/04/2018.
  */
 
@@ -48,7 +49,6 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 
     init {
         System.loadLibrary("native-lib")
-
     }
 
     override fun onCreate(bundle: Bundle?) {
@@ -65,8 +65,14 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
         cameraPreview.faceListener = this
         cameraPreview.previewCallback = this
 
+        //
+//        models = retriveModelsFromGithub()
+
         // show the menu, where a model can be selected
         popupMenu.setOnClickListener(::showPopupMenu)
+//        popupMenu.setOnClickListener {
+//            showPopupMenu(it, models.keys.toList())
+//        }
 
         // capture face
         captureButton.setOnClickListener {
@@ -117,11 +123,13 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
     /** ---------------------------------------------------------------------------------------- */
     /** FACE AND LANDMARKS DETECTION */
     /** ---------------------------------------------------------------------------------------- */
+
+    /** store the captured frame for later analisys */
     override fun onPreviewFrame(bytes: ByteArray, camera: Camera) {
         frame = bytes
     }
 
-    /** actor */
+    /** define an Actor that sends the detected landarks to a channel, for later consuming */
     private fun newDetectorActor() = actor<Detection> {
         for ((face, landmarks) in channel) {
             launch(UI) {
@@ -141,14 +149,16 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
         }
     }
 
+    /** localize landmark every time a face is detected */
     override fun onFaceDetection(faces: Array<out Camera.Face>, camera: Camera) {
-        launch(UI) {
+        launch(CommonPool) {
 
             if (frame == null || faces.isEmpty()) {
                 detectorActor.send(Pair(null, null))
                 return@launch
             }
 
+            // get the prominent (bigger) face with a confidence greater than 30
             val bestFace = faces.filter { it.score > 30 }.maxBy { it.score }
 
             if (bestFace != null) {
@@ -171,7 +181,7 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
                     return@launch
                 }
 
-                // ..finally detect landmarks!
+                // ..so, finally detect landmarks!
                 promise = async {
                     Native.analiseFrame(frame, rotation, w, h, rect)
                 }
@@ -239,6 +249,21 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
     private fun showPopupMenu(v: View) {
         val popup = PopupMenu(this, v)
         popup.inflate(R.menu.model_menu)
+
+        popup.setOnMenuItemClickListener(::menuItemClick)
+        popup.show()
+    }
+
+    private fun showPopupMenu2(v: View, items: List<String>) {
+        val popup = PopupMenu(this, v)
+//        popup.menu.add("item")
+//        popup.inflate(R.menu.model_menu)
+
+        // build menu
+        items.forEach {
+            popup.menu.add(it)
+        }
+
         popup.setOnMenuItemClickListener(::menuItemClick)
         popup.show()
     }
@@ -281,34 +306,59 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 
     /** ---------------------------------------------------------------------------------------- */
 
+    //TODO: show error messages as dialogs
+    /** retrive a list of (key, url, name, hash) used to download and show the models */
+    private fun retriveModelsFromGithub(): Map<String, Model> {
+        // download models.json
+        val url = URL("link to models.json")
+        val connection = url.openConnection()
+        val reader  = BufferedInputStream(url.openStream(), 512)
+        val content = String(reader.readBytes())
+
+        // convert string into json array of objects with 4 fields: key, url, name, hash
+        val jsonArray = JSONArray(content)
+        val list = ArrayList<ModelPair>()
+
+        for (i in 0 until jsonArray.length()) {
+            val obj = jsonArray.getJSONObject(i)
+
+            list.add(Pair(obj.getString("key"),
+                    Model(obj.getString("url"), obj.getString("name"), obj.getString("hash"))))
+        }
+
+        return list.toMap()
+    }
+
     companion object {
         val models = mapOf(
-                R.id.eye_eyebrows to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/eye_eyebrows_model.dat.bz2",
-                        name = "eye_eyebrows_model.dat",
-                        hash = "db8a1047de822e9c558b2f2b8ebfc815")
-                ,
-                R.id.face_contour to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/face_contour_model.dat.bz2",
-                        name = "face_contour_model.dat",
-                        hash = "9bfd77ff74cd20b0bf435d50fcb13ece")
-                ,
-                R.id.nose_mouth to Model(
-                        url = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/nose_mouth_model.dat.bz2",
-                        name = "nose_mouth_model.dat",
-                        hash = "92fc14be045c2447814c1130f26a12b4")
-                ,
                 R.id.fast_68_land to Model(
                         url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/face_landmarks_68.dat.bz2",
-                        name = "all_68_model.dat",
-                        hash = "dba4c259742d76b06d8847cae2067e6c")
+                        name = "face_landmarks_68.dat",
+                        hash = "f17f0872dffd5a609b42583f131c4f54")
                 ,
+                R.id.eye_eyebrows to Model(
+                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/eye_eyebrows_22.dat.bz2",
+                        name = "eye_eyebrows_22.dat",
+                        hash = "5747ccf66c8cba43db85f90dcccd8c51")
+                ,
+                R.id.nose_mouth to Model(
+                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/nose_mouth_30.dat.bz2",
+                        name = "nose_mouth_30.dat",
+                        hash = "f82ac22cc1c31a68d5f94f7e04bd5565")
+                ,
+                R.id.face_contour to Model(
+                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/face_contour_17.dat.bz2",
+                        name = "face_contour_17.dat",
+                        hash = "5b29a17a44ecffe30194ce85403e2a8e")
+                ,
+
                 R.id.dlib_68_land to Model(
                         url  = "https://github.com/davisking/dlib-models/raw/master/shape_predictor_68_face_landmarks.dat.bz2",
                         name = "shape_predictor_68_face_landmarks.dat",
                         hash = "73fde5e05226548677a050913eed4e04"
                 )
         )
+//        lateinit var models: Map<String, Model>
 
         const val perm_granted = PackageManager.PERMISSION_GRANTED
         const val perm_camera  = Manifest.permission.CAMERA
@@ -320,3 +370,4 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 }
 
 typealias Detection = Pair<Rect?, LongArray?>
+typealias ModelPair = Pair<String, Model>
