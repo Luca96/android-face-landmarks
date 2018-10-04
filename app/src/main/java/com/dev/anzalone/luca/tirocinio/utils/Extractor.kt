@@ -2,6 +2,7 @@
 
 package com.dev.anzalone.luca.tirocinio.utils
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ProgressDialog
 import android.os.AsyncTask
@@ -32,6 +33,7 @@ class Extractor(activity: Activity, val destination: File,
     }
 
     /** AsyncTask */
+    @SuppressLint("StaticFieldLeak")
     inner class Task : AsyncTask<File, Int, File>() {
 
         override fun onPreExecute() {
@@ -43,7 +45,7 @@ class Extractor(activity: Activity, val destination: File,
             val temp = files[0]
             try {
                 val stream = temp.inputStream()
-                val fileLength = (temp.length() * 1.5).toInt()
+                val fileLength = (temp.length() * 1.558).toInt()  // approximate extracted size
                 val reader = BZip2CompressorInputStream(BufferedInputStream(stream, buffer_size))
                 val writer = FileOutputStream(destination)
 

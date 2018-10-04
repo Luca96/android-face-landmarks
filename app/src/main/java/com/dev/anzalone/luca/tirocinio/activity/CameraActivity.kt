@@ -4,29 +4,28 @@ package com.dev.anzalone.luca.tirocinio.activity
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.hardware.Camera
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
-import android.view.MenuItem
 import android.view.View
 import android.widget.PopupMenu
 import android.widget.Toast
 import com.dev.anzalone.luca.tirocinio.Native
 import com.dev.anzalone.luca.tirocinio.R
 import com.dev.anzalone.luca.tirocinio.camera.CameraUtils
+import com.dev.anzalone.luca.tirocinio.utils.Downloader
 import com.dev.anzalone.luca.tirocinio.utils.Model
+import com.dev.anzalone.luca.tirocinio.utils.UserDialog
 import com.dev.anzalone.luca.tirocinio.utils.mapTo
 import kotlinx.android.synthetic.main.activity_camera.*
 import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.android.UI
 import kotlinx.coroutines.experimental.channels.actor
 import org.json.JSONArray
-import java.io.BufferedInputStream
 import java.io.File
-import java.net.URL
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -41,11 +40,13 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
     private var frame: ByteArray?  = null
     private var currentFace: Rect? = null
     private lateinit var modelDir: File
+    private lateinit var modelsJson: File
     private var currentModelId = -1
     private val lock = ReentrantLock()
     private val detectorActor = newDetectorActor()
     private var promise: Deferred<LongArray>? = null
     private var imageTaken = false
+    private var modelsFetched = false
 
     init {
         System.loadLibrary("native-lib")
@@ -58,21 +59,16 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 
         askPermission()
 
-        // private model directory
-        modelDir = getDir("models", Context.MODE_PRIVATE)
+        // private model directory, and models.json file
+        modelDir = getDir("models", MODE_PRIVATE)
+        modelsJson = File(getDir("models", MODE_PRIVATE), "models.json")
 
         // set face detection listener
         cameraPreview.faceListener = this
         cameraPreview.previewCallback = this
 
-        //
-//        models = retriveModelsFromGithub()
-
         // show the menu, where a model can be selected
         popupMenu.setOnClickListener(::showPopupMenu)
-//        popupMenu.setOnClickListener {
-//            showPopupMenu(it, models.keys.toList())
-//        }
 
         // capture face
         captureButton.setOnClickListener {
@@ -86,9 +82,69 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
         // set cameraPreview for cameraOverlay
         cameraOverlay.preview = cameraPreview
 
-        // handle display rotation
+        // handle display rotation (keep track of the current loaded model)
         if (bundle != null) {
             currentModelId = bundle.getInt(model_id, -1)
+        }
+
+        launch(UI) {
+            delay(1500L)
+
+            // if models.json does't exist retrieve and alert user
+            if (!modelsJson.exists()) {
+                fetchModels(::loadModelsFromJson)
+
+            } else {
+                // ..warn user about eventual new models and updates
+                loadModelsFromJson(modelsJson.readText())  // load models from (stored) models.json
+
+                val updates = ArrayList<Model>()
+                var newModels = 0
+
+                UserDialog(this@CameraActivity,
+                        title = "Check for new models?",
+                        msg = "this will check if there are new models or updates",
+                        onPositive = {
+                            fetchModels { json ->
+                                val jarray = JSONArray(json)
+                                val size = jarray.length()
+
+                                for (i in 0 until size) {
+                                    val obj  = jarray.getJSONObject(i)
+                                    val mod1 = Model.fromJsonObject(obj)
+                                    val mod2 = models.getOrNull(mod1.id)
+
+                                    // keep track of new models and models updates
+                                    if (mod2 == null) {
+                                        newModels++
+
+                                    } else if (mod1.version > mod2.version) {
+                                        updates.add(mod1)
+                                    }
+                                }
+
+                                // warn user
+                                if (updates.size > 0) {
+                                    UserDialog(this@CameraActivity,
+                                            title = "Fetch summary:",
+                                            msg = "There are $newModels new models and $updates updates.\nDo you want to download the updated models?",
+                                            positiveLabel = "Update",
+                                            negativeLabel = "Close",
+                                            onPositive = {
+                                                updates.forEach { it ->
+                                                    Downloader(this@CameraActivity,
+                                                            title = "Update model ${it.name}",
+                                                            destination = File(modelDir, it.file),
+                                                            onError = {}   //TODO: show error message
+                                                    ).start(it.url)
+                                                }
+                                            }
+                                    ).show()
+                                }
+                            }
+                        }
+                ).show()
+            }
         }
     }
 
@@ -194,13 +250,14 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
     /** ---------------------------------------------------------------------------------------- */
     /** POPUP-MENU */
     /** ---------------------------------------------------------------------------------------- */
-    private fun menuItemClick(item: MenuItem): Boolean {
-        val itemId = item.itemId
-        val model  = models[itemId] ?: return true
+
+    /** load a model from dlib */
+    private fun loadModel(id: Int): Boolean {
+        val model  = models[id] ?: return true
 
         if (model.exists(modelDir)) {
             // try loading...
-            if (currentModelId != itemId) {
+            if (currentModelId != id) {
 
                 if (lock.isLocked) // already loading another model
                     return true
@@ -222,7 +279,7 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
                         val loaded = model.loadAsync(modelDir).await()
 
                         currentModelId = when (loaded) {
-                            true -> { imageTaken = false; itemId }
+                            true -> { imageTaken = false; id }
                             else -> {
                                 model.askToUser(this@CameraActivity, modelDir,
                                         "Something goes wrong :(",
@@ -248,23 +305,17 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 
     private fun showPopupMenu(v: View) {
         val popup = PopupMenu(this, v)
-        popup.inflate(R.menu.model_menu)
+        val menu  = popup.menu
 
-        popup.setOnMenuItemClickListener(::menuItemClick)
-        popup.show()
-    }
+        models.forEach { model ->
+            val item = menu.add(model.name)
 
-    private fun showPopupMenu2(v: View, items: List<String>) {
-        val popup = PopupMenu(this, v)
-//        popup.menu.add("item")
-//        popup.inflate(R.menu.model_menu)
-
-        // build menu
-        items.forEach {
-            popup.menu.add(it)
+            item.setOnMenuItemClickListener {
+                loadModel(model.id)
+                true
+            }
         }
 
-        popup.setOnMenuItemClickListener(::menuItemClick)
         popup.show()
     }
 
@@ -291,7 +342,7 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
         }
     }
 
-    /** asks for camera and internet permission */
+    /** asks for camera and storage permission */
     private fun askPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // permission for camera
@@ -306,59 +357,47 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
 
     /** ---------------------------------------------------------------------------------------- */
 
-    //TODO: show error messages as dialogs
-    /** retrive a list of (key, url, name, hash) used to download and show the models */
-    private fun retriveModelsFromGithub(): Map<String, Model> {
-        // download models.json
-        val url = URL("link to models.json")
-        val connection = url.openConnection()
-        val reader  = BufferedInputStream(url.openStream(), 512)
-        val content = String(reader.readBytes())
+    /** check whether the device is connected to the internet */
+    private fun isConnected2Internet() : Boolean {
+        val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        return manager.activeNetworkInfo.isConnected
+    }
 
-        // convert string into json array of objects with 4 fields: key, url, name, hash
-        val jsonArray = JSONArray(content)
-        val list = ArrayList<ModelPair>()
+    /** retrieve the models.json file from GitHub */
+    private fun fetchModels(callback: (String) -> Unit = {}) {
+        val dialog = UserDialog(this@CameraActivity,
+                title = "Error during fetching models",
+                msg = "is the device connected to the internet?",
+                onPositive = { fetchModels(callback) },
+                positiveLabel = "Retry?",
+                negativeLabel = "Close"
+        )
 
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.getJSONObject(i)
+        Downloader(this@CameraActivity,
+                title = "Fetching available models..",
+                destination = modelsJson,
+                onError = { dialog.show() },
+                onSuccess = { callback(it.readText()) }
+        ).start(json_url)
+    }
 
-            list.add(Pair(obj.getString("key"),
-                    Model(obj.getString("url"), obj.getString("name"), obj.getString("hash"))))
+    /** load the models from the content of a json file */
+    private fun loadModelsFromJson(contents: String) {
+        val jarray = JSONArray(contents)
+
+        models.clear()
+
+        // load model info stored inside models.json
+        for (i in 0 until jarray.length()) {
+            val obj = jarray.getJSONObject(i)
+            models.add(Model.fromJsonObject(obj))
         }
 
-        return list.toMap()
+        modelsFetched = true
     }
 
     companion object {
-        val models = mapOf(
-                R.id.fast_68_land to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/face_landmarks_68.dat.bz2",
-                        name = "face_landmarks_68.dat",
-                        hash = "f17f0872dffd5a609b42583f131c4f54")
-                ,
-                R.id.eye_eyebrows to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/eye_eyebrows_22.dat.bz2",
-                        name = "eye_eyebrows_22.dat",
-                        hash = "5747ccf66c8cba43db85f90dcccd8c51")
-                ,
-                R.id.nose_mouth to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/nose_mouth_30.dat.bz2",
-                        name = "nose_mouth_30.dat",
-                        hash = "f82ac22cc1c31a68d5f94f7e04bd5565")
-                ,
-                R.id.face_contour to Model(
-                        url  = "https://github.com/Luca96/dlib-minified-models/raw/master/face%20landmarks/face_contour_17.dat.bz2",
-                        name = "face_contour_17.dat",
-                        hash = "5b29a17a44ecffe30194ce85403e2a8e")
-                ,
-
-                R.id.dlib_68_land to Model(
-                        url  = "https://github.com/davisking/dlib-models/raw/master/shape_predictor_68_face_landmarks.dat.bz2",
-                        name = "shape_predictor_68_face_landmarks.dat",
-                        hash = "73fde5e05226548677a050913eed4e04"
-                )
-        )
-//        lateinit var models: Map<String, Model>
+        val models = ArrayList<Model>()
 
         const val perm_granted = PackageManager.PERMISSION_GRANTED
         const val perm_camera  = Manifest.permission.CAMERA
@@ -366,6 +405,7 @@ class CameraActivity : Activity(), Camera.PreviewCallback, Camera.FaceDetectionL
         const val request_camera  = 100
         const val request_storage = 200
         const val model_id = "CameraActivity.model_id"
+        const val json_url = "https://github.com/Luca96/dlib-minified-models/raw/master/face_landmarks/models.json"
     }
 }
 

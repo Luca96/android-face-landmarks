@@ -4,26 +4,35 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.dev.anzalone.luca.tirocinio.Native
 import kotlinx.coroutines.experimental.async
+import org.json.JSONObject
 import java.io.File
 import java.math.BigInteger
 import java.security.MessageDigest
 
 /**
- * Class that represent a model for dlib
+ * Class that represent a model for dlib,
+ * [url]: link to download the model,
+ * [name]: model name showed in the UI menu
+ * [hash]: hash used to check the integrity of the model
+ * [id]: model id
+ * [version]: actual model version
+ * [file]: file name of the stored model (in the device memory)
  */
-class Model(val url: String, val name: String, val hash: String) {
+class Model(val url: String, val name: String, val hash: String,
+            val id: Int, val version: Float, val file: String) {
 
     /** check if the model exists */
-    fun exists(dir: File) = File(dir, name).exists()
+    fun exists(dir: File) = File(dir, file).exists()
 
     /** download and extract the model to the given directory */
     private fun storeTo(activity: Activity, saveDir: File) {
         val temp = File(saveDir, "temp")
-        val dest = File(saveDir, name)
+        val dest = File(saveDir, file)
 
-        Downloader(activity, temp,
+        Downloader(activity,
+                destination = temp,
                 onError = { if (it.exists()) it.delete() },
-                onSuccess = {
+                onSuccess = { it ->
                     activity.runOnUiThread {
                         Extractor(activity, dest,
                                 onSuccess = { if (temp.exists()) temp.delete() },
@@ -37,21 +46,17 @@ class Model(val url: String, val name: String, val hash: String) {
         ).start(url)
     }
 
+    /** ask the user to download the missing model */
     fun askToUser(activity: Activity, saveDir: File, title: String, message: String) {
-        AlertDialog.Builder(activity)
-                .setTitle(title)
-                .setMessage(message)
-                .setPositiveButton("Yes", { _, _ ->
-                    this.storeTo(activity, saveDir)
-                })
-                .setNegativeButton("No", { _, _ -> })
+        UserDialog(activity, title, message,
+                onPositive = { storeTo(activity, saveDir) })
                 .show()
     }
 
     /** try to load the model, returns true on success */
     private fun loadFrom(dir: File): Boolean {
         return try {
-            Native.loadModel(File(dir, name).path)
+            Native.loadModel(File(dir, file).path)
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -66,11 +71,8 @@ class Model(val url: String, val name: String, val hash: String) {
 
     /** check if the downloaded and then extracted model is corrupted */
     fun isCorrupted(dir: File): Boolean {
-        val file = File(dir, name)
-//        val len = file.length
-//        val bytes = file.byteInputStream().readBytes(len)
-
-        val hash = MD5.digest(file)
+        val file = File(dir, file)
+        val hash = digest(file)
         println("hash ${this.hash} == $hash: ${this.hash == hash}")
 
         return this.hash != hash
@@ -84,7 +86,7 @@ class Model(val url: String, val name: String, val hash: String) {
             file.delete()
     }
 
-    companion object MD5 {
+    companion object {
 
         /**
          * compute the hash of the model file
@@ -116,6 +118,18 @@ class Model(val url: String, val name: String, val hash: String) {
 
                 ""
             }
+        }
+
+        /** create a model from a json object */
+        fun fromJsonObject(obj: JSONObject) : Model {
+            return Model(
+                    obj.getString("url"),
+                    obj.getString("name"),
+                    obj.getString("hash"),
+                    obj.getString("id").toInt(),
+                    obj.getString("version").toFloat(),
+                    obj.getString("file")
+            )
         }
     }
 }

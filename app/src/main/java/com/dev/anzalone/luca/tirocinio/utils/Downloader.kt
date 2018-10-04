@@ -2,8 +2,10 @@
 
 package com.dev.anzalone.luca.tirocinio.utils
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ProgressDialog
+import android.content.Context
 import android.os.AsyncTask
 import android.os.Handler
 import android.os.Looper
@@ -16,7 +18,8 @@ import java.net.URL
 /**
  * Class used to download files
  */
-class Downloader(activity: Activity, val destination: File,
+class Downloader(activity: Activity, title: String = "Downloading file..",
+                 val destination: File,
                  val onError: (File) -> Unit = {},
                  val onSuccess: (File) -> Unit = {})
 {
@@ -25,7 +28,7 @@ class Downloader(activity: Activity, val destination: File,
     init {
         progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
         progressDialog.setCancelable(false)
-        progressDialog.setTitle("Downloading file...")
+        progressDialog.setTitle(title)
     }
 
     fun start(url: String) {
@@ -33,6 +36,7 @@ class Downloader(activity: Activity, val destination: File,
     }
 
     /** AsyncTask */
+    @SuppressLint("StaticFieldLeak")
     inner class Task : AsyncTask<String, Int, File>() {
 
         override fun onPreExecute() {
