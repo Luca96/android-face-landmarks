@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">FaceLandmarks</string>
+    <string name="camera_swap_button">camera swap button</string>
+    <string name="select_a_model">Select a model</string>
+    <string name="eye_eyebrows">Eye eyebrows</string>
+    <string name="face_contour">Face contour</string>
+    <string name="nose_mouth">Nose mouth</string>
+    <string name="fast_68_landmarks">Fast 68 Landmarks</string>
+    <string name="dlib_68_landmarks">Dlib 68 Landmarks</string>
+</resources>

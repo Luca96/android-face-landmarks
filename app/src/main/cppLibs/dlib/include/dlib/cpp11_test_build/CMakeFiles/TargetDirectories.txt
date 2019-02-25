@@ -1,0 +1,3 @@
+E:/Luca/Librerie/Dlib/dlib-19.16/dlib/cpp11_test_build/CMakeFiles/rebuild_cache.dir
+E:/Luca/Librerie/Dlib/dlib-19.16/dlib/cpp11_test_build/CMakeFiles/cpp11_test.dir
+E:/Luca/Librerie/Dlib/dlib-19.16/dlib/cpp11_test_build/CMakeFiles/edit_cache.dir
