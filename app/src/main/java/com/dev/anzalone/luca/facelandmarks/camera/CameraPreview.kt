@@ -17,9 +17,9 @@ import com.dev.anzalone.luca.facelandmarks.Native
 import com.dev.anzalone.luca.facelandmarks.utils.inBounds
 import com.dev.anzalone.luca.facelandmarks.utils.mapTo
 import com.dev.anzalone.luca.facelandmarks.utils.scale
-import kotlinx.coroutines.experimental.android.UI
-import kotlinx.coroutines.experimental.async
-import kotlinx.coroutines.experimental.launch
+import kotlinx.coroutines.android.UI
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import java.io.BufferedOutputStream
 import java.io.FileOutputStream
 import kotlin.math.absoluteValue

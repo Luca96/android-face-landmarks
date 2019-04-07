@@ -17,17 +17,6 @@ set(PROJECT_PATH E:/Luca/Progetti/Android/FaceLandmarks)
 # Configure import libs: MAKE SURE TO HAVE A 'cppLibs' DIRECTORY"
 set(LIB_DIR ${CMAKE_SOURCE_DIR}/src/main/cppLibs)
 
-# ------------------------------------------------------------------
-# -- PLEASE, READ
-# ------------------------------------------------------------------
-# This CMake file assume that the 'setup' script was already
-# executed. If not run the script before working with AndroidStudio.
-#
-# The script is responsible of:
-# -- compiling Dlib for the specified ABIs
-# -- copying every generated 'libdlib.so' for each selected ABI
-# -- copying the prebuilt 'lib_opencv4.so' for each selected ABI.
-# ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
 # -- OPENCV

@@ -21,9 +21,9 @@ import com.dev.anzalone.luca.facelandmarks.utils.Model
 import com.dev.anzalone.luca.facelandmarks.utils.UserDialog
 import com.dev.anzalone.luca.facelandmarks.utils.mapTo
 import kotlinx.android.synthetic.main.activity_camera.*
-import kotlinx.coroutines.experimental.*
-import kotlinx.coroutines.experimental.android.UI
-import kotlinx.coroutines.experimental.channels.actor
+import kotlinx.coroutines.*
+import kotlinx.coroutines.android.UI
+import kotlinx.coroutines.channels.actor
 import org.json.JSONArray
 import java.io.File
 import java.util.concurrent.locks.ReentrantLock

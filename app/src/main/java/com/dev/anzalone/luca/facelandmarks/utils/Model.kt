@@ -2,7 +2,7 @@ package com.dev.anzalone.luca.facelandmarks.utils
 
 import android.app.Activity
 import com.dev.anzalone.luca.facelandmarks.Native
-import kotlinx.coroutines.experimental.async
+import kotlinx.coroutines.async
 import org.json.JSONObject
 import java.io.File
 import java.math.BigInteger
